@@ -11,9 +11,9 @@
 static int
 loopback_transmit(struct net_device *dev, uint16_t type, const uint8_t *data, size_t len, const void *dst)
 {
-  debugf("dev=%s, type=%s(0x%04x), len=%zu", dev->name, type, len);
+  debugf("dev=%s, type=0x%04x, len=%zu", dev->name, type, len);
   debugdump(data, len);
-  // return net_input_handler(type, data, len, dev);
+  net_input_handler(type, data, len, dev);
   return 0;
 }
 
@@ -27,16 +27,16 @@ loopback_init(void)
   struct net_device *dev;
 
   dev = net_device_alloc();
-  if (!dev) {
-    errorf("net_device_alloc() failure");
-    return NULL;
-  }
   dev->type = NET_DEVICE_TYPE_LOOPBACK;
   dev->mtu = LOOPBACK_MTU;
   dev->hlen = 0;
   dev->alen = 0;
   dev->flags = NET_DEVICE_FLAG_LOOPBACK;
   dev->ops = &loopback_ops;
+  if (!dev) {
+    errorf("net_device_alloc() failure");
+    return NULL;
+  }
   if (net_device_register(dev) == -1) {
     errorf("net_device_register() failure");
     return NULL;
