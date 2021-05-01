@@ -59,7 +59,8 @@ int
 main(int argc, char *argv[])
 {
   ip_addr_t src, dst;
-  size_t offset = IP_HDR_SIZE_MIN;
+  uint16_t id, seq = 0;
+  size_t offset = IP_HDR_SIZE_MIN + ICMP_HDR_SIZE;
   
   signal(SIGINT, on_signal);
   if(setup() == -1) {
@@ -68,9 +69,10 @@ main(int argc, char *argv[])
   }
   ip_addr_pton(LOOPBACK_IP_ADDR, &src);
   dst = src;
+  id = getpid() % UINT16_MAX;
   while(!terminate) {
-    if(ip_output(0x01, test_data + offset, sizeof(test_data) - offset, src, dst) == -1) {
-      errorf("ip_output() failure");
+    if(icmp_output(ICMP_TYPE_ECHO, 0, hton32(id << 16 | ++seq), test_data + offset, sizeof(test_data) - offset, src, dst) == -1) {
+      errorf("icmp_output() failure");
       break;
     }
     sleep(1);
