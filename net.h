@@ -39,6 +39,7 @@ struct net_device; /* forward declaration */
 
 struct net_device {
     struct net_device *next;
+    struct net_iface *ifaces;
     unsigned int index;
     char name[IFNAMSIZ];
     uint16_t type;
@@ -55,6 +56,12 @@ struct net_device {
     void *priv;
 };
 
+struct net_iface {
+    struct net_iface *next;
+    struct net_device *dev;
+    int family;
+};
+
 struct net_device_ops {
     int (*open)(struct net_device *dev);
     int (*close)(struct net_device *dev);
@@ -66,6 +73,10 @@ extern struct net_device *
 net_device_alloc(void);
 extern int
 net_device_register(struct net_device *dev);
+extern int
+net_device_add_iface(struct net_device *dev, struct net_iface *iface);
+extern struct net_iface *
+net_device_get_iface(struct net_device *dev, int family);
 extern int
 net_device_output(struct net_device *dev, uint16_t type, const uint8_t *data, size_t len, const void *dst);
 

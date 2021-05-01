@@ -21,6 +21,36 @@ struct ip_hdr {
   ip_addr_t dst;
 };
 
+const ip_addr_t IP_ADDR_ANY       = 0x00000000; /* 0.0.0.0 */
+const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff; /* 255.255.255.255 */
+
+static struct ip_iface *ifaces;
+
+int
+ip_addr_pton(const char *p, ip_addr_t *n)
+{
+  char *sp, *ep;
+  int idx;
+  long ret;
+
+  sp = (char *)p;
+  for (idx = 0; idx < 4; idx++) {
+    ret = strtol(sp, &ep, 10);
+    if (ret < 0 || ret > 255) {
+      return -1;
+    }
+    if (ep == sp) {
+      return -1;
+    }
+    if ((idx == 3 && *ep != '\0') || (idx != 3 && *ep != '.')) {
+      return -1;
+    }
+    ((uint8_t *)n)[idx] = ret;
+    sp = ep + 1;
+  }
+  return 0;
+}
+
 char *
 ip_addr_ntop(const ip_addr_t n, char *p, size_t size)
 {
@@ -62,12 +92,68 @@ ip_dump(const uint8_t *data, size_t len)
   funlockfile(stderr);
 }
 
-// static void
-// ip_input(const uint8_t *data, size_t len, struct net_device *dev)
-// {
-//   debugf("dev=%s, len=%zu", dev->name, len);
-//   debugdump(data, len);
-// }
+struct ip_iface *
+ip_iface_alloc(const char *unicast, const char *netmask)
+{
+  struct ip_iface *iface;
+
+  iface = calloc(1, sizeof(*iface));
+  if (!iface) {
+    errorf("calloc() failure");
+    return NULL;
+  }
+  NET_IFACE(iface)->family = NET_IFACE_FAMILY_IP;
+  if (ip_addr_pton(unicast, &iface->unicast) == -1) {
+    errorf("ip_addr_pton() failure, addr=%s", unicast);
+    free(iface);
+    return NULL;
+  }
+  if (ip_addr_pton(netmask, &iface->netmask) == -1) {
+    errorf("ip_addr_pton() failure, addr=%s", netmask);
+    free(iface);
+    return NULL;
+  }
+  iface->broadcast = (iface->unicast & iface->netmask) | ~iface->netmask;
+  return iface;
+}
+
+int
+ip_iface_register(struct net_device *dev, struct ip_iface *iface)
+{
+  char addr1[IP_ADDR_STR_LEN];
+  char addr2[IP_ADDR_STR_LEN];
+  char addr3[IP_ADDR_STR_LEN];
+
+  if (net_device_add_iface(dev, NET_IFACE(iface)) == -1) {
+    errorf("net_device_add_iface() failure");
+    return -1;
+  }
+  // if (!ip_route_add(iface->unicast & iface->netmask, iface->netmask, IP_ADDR_ANY, iface)) {
+  //   errorf("ip_route_add() failure");
+  //   return -1;
+  // }
+  iface->next = ifaces;
+  ifaces = iface;
+  infof("registerd: dev=%s, unicast=%s, netmask=%s, broadcast=%s", dev->name,
+    ip_addr_ntop(iface->unicast, addr1, sizeof(addr1)),
+    ip_addr_ntop(iface->unicast, addr2, sizeof(addr2)),
+    ip_addr_ntop(iface->netmask, addr3, sizeof(addr3)));
+  return 0;
+}
+
+struct ip_iface *
+ip_iface_select(ip_addr_t addr)
+{
+  struct ip_iface *entry;
+
+  for (entry = ifaces; entry; entry = entry->next) {
+    if (entry->unicast == addr) {
+      break;
+    }
+  }
+  return entry;
+}
+
 static void
 ip_input(const uint8_t *data, size_t len, struct net_device *dev)
 {
@@ -75,6 +161,8 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
   uint16_t offset;
   uint8_t v;
   uint16_t hlen, total;
+  struct ip_iface *iface;
+  char addr[IP_ADDR_STR_LEN];
 
   if (len < IP_HDR_SIZE_MIN) {
     errorf("too short");
@@ -109,7 +197,19 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
     errorf("fragments does not support");
     return;
   }
-  debugf("dev=%s, protocol=%u, total=%u", dev->name, hdr->protocol, total);
+  iface = (struct ip_iface *)net_device_get_iface(dev, NET_IFACE_FAMILY_IP);
+  if (!iface) {
+    /* iface is not registered to the device */
+    return;
+  }
+  if (hdr->dst != iface->unicast) {
+    if (hdr->dst != iface->broadcast && hdr->dst != IP_ADDR_BROADCAST) {
+      /* for other host */
+      return;
+    }
+  }
+  debugf("dev=%s, iface=%s, protocol=%u, total=%u",
+          dev->name, ip_addr_ntop(iface->unicast, addr, sizeof(addr)), hdr->protocol, total);
   ip_dump(data, total);
 }
 
