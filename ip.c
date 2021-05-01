@@ -7,6 +7,14 @@
 #include "util.h"
 #include "net.h"
 #include "ip.h"
+#include "icmp.h"
+
+struct ip_protocol {
+  struct ip_protocol *next;
+  char name[16];
+  uint8_t type;
+  void (*handler)(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct ip_iface *iface);
+};
 
 struct ip_hdr {
   uint8_t vhl;
@@ -21,26 +29,19 @@ struct ip_hdr {
   ip_addr_t dst;
 };
 
-struct ip_protocol {
-    struct ip_protocol *next;
-    char name[16];
-    uint8_t type;
-    void (*handler)(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct ip_iface *iface);
-};
-
 struct ip_route {
-    struct ip_route *next;
-    ip_addr_t network;
-    ip_addr_t netmask;
-    ip_addr_t nexthop;
-    struct ip_iface *iface;
+  struct ip_route *next;
+  ip_addr_t network;
+  ip_addr_t netmask;
+  ip_addr_t nexthop;
+  struct ip_iface *iface;
 };
 
 const ip_addr_t IP_ADDR_ANY       = 0x00000000; /* 0.0.0.0 */
 const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff; /* 255.255.255.255 */
 
 static struct ip_iface *ifaces;
-// static struct ip_protocol *protocols;
+static struct ip_protocol *protocols;
 static struct ip_route *routes;
 
 int
@@ -180,6 +181,7 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
   uint16_t hlen, total;
   struct ip_iface *iface;
   char addr[IP_ADDR_STR_LEN];
+  struct ip_protocol *proto;
 
   if (len < IP_HDR_SIZE_MIN) {
     errorf("too short");
@@ -228,6 +230,13 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
   debugf("dev=%s, iface=%s, protocol=%u, total=%u",
           dev->name, ip_addr_ntop(iface->unicast, addr, sizeof(addr)), hdr->protocol, total);
   ip_dump(data, total);
+  for (proto = protocols; proto; proto = proto->next) {
+    if (proto->type == hdr->protocol) {
+      proto->handler((uint8_t *)hdr + hlen, len - hlen, hdr->src, hdr->dst, iface);
+      return;
+    }
+  }
+  /* unsupported protocol */
 }
 
 static uint16_t
@@ -343,6 +352,32 @@ ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_a
     return -1;
   }
   return len;
+}
+
+/* NOTE: must not be call after net_run() */
+int
+ip_protocol_register(const char *name, uint8_t type, void (*handler)(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct ip_iface *iface))
+{
+  struct ip_protocol *entry;
+
+  for (entry = protocols; entry; entry = entry->next) {
+    if (entry->type == type) {
+      errorf("already registerd, type=%s(0x%02x), exist=%s(0x%02x)", name, type, entry->name, entry->type);
+      return -1;
+    }
+  }
+  entry = calloc(1, sizeof(*entry));
+  if (!entry) {
+    errorf("calloc() failure");
+    return -1;
+  }
+  strncpy(entry->name, name, sizeof(entry->name)-1);
+  entry->type = type;
+  entry->handler = handler;
+  entry->next = protocols;
+  protocols = entry;
+  infof("registerd, type=%s(0x%02x)", entry->name, entry->type);
+  return 0;
 }
 
 int
