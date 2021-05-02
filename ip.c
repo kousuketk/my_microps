@@ -6,6 +6,7 @@
 
 #include "util.h"
 #include "net.h"
+#include "arp.h"
 #include "ip.h"
 #include "icmp.h"
 
