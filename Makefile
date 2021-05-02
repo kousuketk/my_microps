@@ -23,10 +23,10 @@ DRIVERS = driver/null.o \
 
 OBJS = util.o \
 			 net.o \
+       ether.o \
+			 arp.o \
 			 ip.o \
 			 icmp.o \
-			 ether.o \
-			 arp.o \
 
 CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 
