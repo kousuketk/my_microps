@@ -69,6 +69,8 @@ struct net_device_ops {
     int (*poll)(struct net_device *dev);
 };
 
+extern volatile sig_atomic_t net_interrupt;
+
 extern struct net_device *
 net_device_alloc(void);
 extern int
@@ -85,6 +87,11 @@ net_input_handler(uint16_t type, const uint8_t *data, size_t len, struct net_dev
 
 extern int
 net_protocol_register(uint16_t type, void (*handler)(const uint8_t *data, size_t len, struct net_device *dev));
+// extern char *
+// net_protocol_name(uint16_t type);
+
+extern int
+net_timer_register(const char *name, struct timeval interval, void (*handler)(void));
 
 extern int
 net_run(void);
