@@ -310,7 +310,7 @@ arp_timer(void)
   struct timeval now, diff;
 
   pthread_mutex_lock(&mutex);
-  gettimeofday(&now, NULL);
+  gettimeofday(&now, NULL); 
   for (entry = caches; entry < tailof(caches); entry++) {
     if (entry->state != ARP_CACHE_STATE_FREE && entry->state != ARP_CACHE_STATE_STATIC) {
       timersub(&now, &entry->timestamp, &diff);

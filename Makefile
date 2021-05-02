@@ -11,11 +11,12 @@ TESTS = test/step0.exe \
 				test/step8.exe \
 				test/step9.exe \
 				test/step10.exe \
-				test/step11.exe \
-				test/step12.exe \
-				test/step13.exe \
-				test/step14.exe \
-				test/step15.exe \
+				test/step16.exe \
+				# test/step11.exe \
+				# test/step12.exe \
+				# test/step13.exe \
+				# test/step14.exe \
+				# test/step15.exe \
 
 DRIVERS = driver/null.o \
 					driver/loopback.o \
