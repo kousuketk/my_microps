@@ -8,6 +8,7 @@
 #include "ip.h"
 #include "icmp.h"
 #include "udp.h"
+#include "tcp.h"
 
 #include "driver/loopback.h"
 #include "driver/ether_tap.h"
@@ -77,39 +78,13 @@ cleanup(void)
 int
 main(int argc, char *argv[])
 {
-  int soc;
-  struct udp_endpoint local, foreign;
-  uint8_t buf[1024];
-  char ep[UDP_ENDPOINT_STR_LEN];
-  size_t ret;
-
   signal(SIGINT, on_signal);
   if(setup() == -1) {
     errorf("setup() failure");
     return -1;
   }
-  soc = udp_open();
-  if(soc == -1) {
-    errorf("udp_open() failure");
-    return -1;
-  }
-  udp_endpoint_pton("0.0.0.0:7", &src);
-  if (udp_bind(soc, &local) == -1) {
-    errorf("udp_bind() failure");
-    return -1;
-  }
-  debugf("waiting for data...");
   while(!terminate) {
-    ret = udp_recvfrom(soc, bug, sizeof(buf), &foreign);
-    if(ret <= 0) {
-      break;
-    }
-    infof("%zu bytes data from %s", ret, udp_endpoint_ntop(&foreign, ep, sizeof(ep)));
-    hexdump(stderr, buf, ret);
-    if(udp_sendto(soc, buf, ret, &foreign) == -1) {
-      errorf("udp_sendto() failure");
-      break;
-    }
+    sleep(1);
   }
   cleanup();
   return 0;
