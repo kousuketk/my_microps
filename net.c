@@ -38,6 +38,8 @@ static struct net_protocol *protocols;
 static struct net_device *devices;
 static struct net_timer *timers;
 
+volatile sig_atomic_t net_interrupt;
+
 /* NOTE: must not be call after net_run() */
 int
 net_timer_register(const char *name, struct timeval interval, void (*handler)(void))
