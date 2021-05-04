@@ -856,6 +856,180 @@ tcp_init(void)
 /*
  * TCP User Command (RFC793)
  */
+ssize_t
+tcp_send(int id, uint8_t *data, size_t len)
+{
+  struct tcp_pcb *pcb;
+  ssize_t sent = 0;
+  struct ip_iface *iface;
+  size_t mss, cap, slen;
+  struct timespec timeout;
+
+  pthread_mutex_lock(&mutex);
+  pcb = tcp_pcb_get(id);
+  if (!pcb) {
+    errorf("pcb not found");
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  }
+RETRY:
+  switch (pcb->state) {
+  case TCP_PCB_STATE_CLOSED:
+    errorf("connection does not exist");
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  case TCP_PCB_STATE_LISTEN:
+    // ignore: change the connection from passive to active
+    errorf("this connection is passive");
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  case TCP_PCB_STATE_SYN_SENT:
+  case TCP_PCB_STATE_SYN_RECEIVED:
+    // ignore: Queue the data for transmission after entering ESTABLISHED state
+    errorf("insufficient resources");
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  case TCP_PCB_STATE_ESTABLISHED:
+  case TCP_PCB_STATE_CLOSE_WAIT:
+    iface = ip_route_get_iface(pcb->local.addr);
+    if (!iface) {
+      errorf("iface not found");
+      pthread_mutex_unlock(&mutex);
+      return -1;
+    }
+    mss = NET_IFACE(iface)->dev->mtu - (IP_HDR_SIZE_MIN + sizeof(struct tcp_hdr));
+    while (sent < (ssize_t)len) {
+      cap = pcb->snd.wnd - (pcb->snd.nxt - pcb->snd.una);
+      if (!cap) {
+        clock_gettime(CLOCK_REALTIME, &timeout);
+        timespec_add_nsec(&timeout, 10000000); /* 100ms */
+        pcb->wait++;
+        pthread_cond_timedwait(&pcb->cond, &mutex, &timeout);
+        pcb->wait--;
+        if (net_interrupt) {
+          break;
+        }
+        goto RETRY;
+      }
+      slen = MIN(MIN(mss, len - sent), cap);
+      if (tcp_output(pcb, TCP_FLG_ACK | TCP_FLG_PSH, data + sent, slen) == -1) {
+        errorf("tcp_output() failure");
+        pcb->state = TCP_PCB_STATE_CLOSED;
+        tcp_pcb_release(pcb);
+        pthread_mutex_unlock(&mutex);
+        return -1;
+      }
+      pcb->snd.nxt += slen;
+      sent += slen;
+    }
+    break;
+  case TCP_PCB_STATE_FIN_WAIT1:
+  case TCP_PCB_STATE_FIN_WAIT2:
+  case TCP_PCB_STATE_CLOSING:
+  case TCP_PCB_STATE_LAST_ACK:
+  case TCP_PCB_STATE_TIME_WAIT:
+    errorf("connection closing");
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  default:
+    errorf("unknown state '%u'", pcb->state);
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  }
+  pthread_mutex_unlock(&mutex);
+  return sent;
+}
+
+ssize_t
+tcp_receive(int id, uint8_t *buf, size_t size)
+{
+  struct tcp_pcb *pcb;
+  size_t remain, len;
+  struct timespec timeout;
+
+  pthread_mutex_lock(&mutex);
+  pcb = tcp_pcb_get(id);
+  if (!pcb) {
+    errorf("pcb not found");
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  }
+RETRY:
+  switch (pcb->state) {
+  case TCP_PCB_STATE_CLOSED:
+    errorf("connection does not exist");
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  case TCP_PCB_STATE_LISTEN:
+  case TCP_PCB_STATE_SYN_SENT:
+  case TCP_PCB_STATE_SYN_RECEIVED:
+    /* ignore: Queue for processing after entering ESTABLISHED state */
+    errorf("insufficient resources");
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  case TCP_PCB_STATE_ESTABLISHED:
+  case TCP_PCB_STATE_FIN_WAIT1:
+  case TCP_PCB_STATE_FIN_WAIT2:
+    remain = sizeof(pcb->buf) - pcb->rcv.wnd;
+    if (!remain) {
+      clock_gettime(CLOCK_REALTIME, &timeout);
+      timespec_add_nsec(&timeout, 10000000); /* 100ms */
+      pcb->wait++;
+      pthread_cond_timedwait(&pcb->cond, &mutex, &timeout);
+      pcb->wait--;
+      if (net_interrupt) {
+        errorf("interrupt");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+      }
+      goto RETRY;
+    }
+    break;
+  case TCP_PCB_STATE_CLOSE_WAIT:
+    remain = sizeof(pcb->buf) - pcb->rcv.wnd;
+    if (remain) {
+      break;
+    }
+    /* fall through */
+  case TCP_PCB_STATE_CLOSING:
+  case TCP_PCB_STATE_LAST_ACK:
+  case TCP_PCB_STATE_TIME_WAIT:
+    debugf("connection closing");
+    pthread_mutex_unlock(&mutex);
+    return 0;
+  default:
+    errorf("unknown state '%u'", pcb->state);
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  }
+  len = MIN(size, remain);
+  memcpy(buf, pcb->buf, len);
+  memmove(pcb->buf, pcb->buf + len, remain - len);
+  pcb->rcv.wnd += len;
+  pthread_mutex_unlock(&mutex);
+  return len;
+}
+
+/*
+ * TCP User Command (Common)
+ */
+int
+tcp_close(int id)
+{
+  struct tcp_pcb *pcb;
+
+  pthread_mutex_lock(&mutex);
+  pcb = tcp_pcb_get(id);
+  if(!pcb) {
+    errorf("pcb not found");
+    pthread_mutex_unlock(&mutex);
+    return -1;
+  }
+  tcp_output(pcb, TCP_FLG_RST, NULL, 0);
+  tcp_pcb_release(pcb);
+  pthread_mutex_unlock(&mutex);
+  return 0;
+}
 
 int
 tcp_open_rfc793(struct tcp_endpoint *local, struct tcp_endpoint *foreign, int active)
@@ -934,25 +1108,4 @@ AGAIN:
     ip_addr_ntop(pcb->foreign.addr, addr2, sizeof(addr2)), ntoh16(pcb->foreign.port));
   pthread_mutex_unlock(&mutex);
   return id;
-}
-
-/*
- * TCP User Command (Common)
- */
-int
-tcp_close(int id)
-{
-  struct tcp_pcb *pcb;
-
-  pthread_mutex_lock(&mutex);
-  pcb = tcp_pcb_get(id);
-  if(!pcb) {
-    errorf("pcb not found");
-    pthread_mutex_unlock(&mutex);
-    return -1;
-  }
-  tcp_output(pcb, TCP_FLG_RST, NULL, 0);
-  tcp_pcb_release(pcb);
-  pthread_mutex_unlock(&mutex);
-  return 0;
 }

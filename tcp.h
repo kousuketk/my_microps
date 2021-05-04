@@ -39,10 +39,10 @@ tcp_open_rfc793(struct tcp_endpoint *local, struct tcp_endpoint *foreign, int ac
 // tcp_state(int id);
 extern int
 tcp_close(int id);
-// extern ssize_t
-// tcp_send(int id, uint8_t *data, size_t len);
-// extern ssize_t
-// tcp_receive(int id, uint8_t *buf, size_t size);
+extern ssize_t
+tcp_send(int id, uint8_t *data, size_t len);
+extern ssize_t
+tcp_receive(int id, uint8_t *buf, size_t size);
 
 // extern int
 // tcp_open(void);
