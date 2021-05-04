@@ -33,12 +33,12 @@ tcp_endpoint_ntop(struct tcp_endpoint *n, char *p, size_t size);
 extern int
 tcp_init(void);
 
-// extern int
-// tcp_open_rfc793(struct tcp_endpoint *local, struct tcp_endpoint *foreign, int active);
+extern int
+tcp_open_rfc793(struct tcp_endpoint *local, struct tcp_endpoint *foreign, int active);
 // extern int
 // tcp_state(int id);
-// extern int
-// tcp_close(int id);
+extern int
+tcp_close(int id);
 // extern ssize_t
 // tcp_send(int id, uint8_t *data, size_t len);
 // extern ssize_t
