@@ -11,7 +11,7 @@ TESTS = test/step0.exe \
 				test/step8.exe \
 				test/step9.exe \
 				test/step10.exe \
-				test/step22.exe \
+				test/step24.exe \
 				# test/step11.exe \
 				# test/step12.exe \
 				# test/step13.exe \
@@ -24,6 +24,7 @@ TESTS = test/step0.exe \
 				# test/step19.exe \
 				# test/step20.exe \
 				# test/step21.exe \
+				# test/step22.exe \
 
 DRIVERS = driver/null.o \
 					driver/loopback.o \

@@ -104,16 +104,19 @@ struct tcp_pcb {
 };
 
 struct tcp_queue_entry {
-    struct timeval first;
-    struct timeval last;
-    unsigned int rto; /* micro seconds */
-    uint32_t seq;
-    uint8_t flg;
-    size_t len;
+  struct timeval first;
+  struct timeval last;
+  unsigned int rto; /* micro seconds */
+  uint32_t seq;
+  uint8_t flg;
+  size_t len;
 };
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct tcp_pcb pcbs[TCP_PCB_SIZE];
+
+static ssize_t
+tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd, uint8_t *data, size_t len, struct tcp_endpoint *local, struct tcp_endpoint *foreign);
 
 int
 tcp_endpoint_pton(char *p, struct tcp_endpoint *n)
@@ -327,6 +330,31 @@ tcp_retransmit_queue_cleanup(struct tcp_pcb *pcb)
     free(entry);
   }
   return;
+}
+
+static void
+tcp_retransmit_queue_emit(void *arg, void *data)
+{
+  struct tcp_pcb *pcb;
+  struct tcp_queue_entry *entry;
+  struct timeval now, diff, timeout;
+
+  pcb = (struct tcp_pcb *)arg;
+  entry = (struct tcp_queue_entry *)data;
+  gettimeofday(&now, NULL);
+  timersub(&now, &entry->first, &diff);
+  if (diff.tv_sec >= TCP_RETRANSMIT_DEADLINE) {
+    pcb->state = TCP_PCB_STATE_CLOSED;
+    pthread_cond_broadcast(&pcb->cond);
+    return;
+  }
+  timeout = entry->last;
+  timeval_add_usec(&timeout, entry->rto);
+  if (timercmp(&now, &timeout, >)) {
+    tcp_output_segment(entry->seq, pcb->rcv.nxt, entry->flg, pcb->rcv.wnd, (uint8_t *)(entry+1), entry->len, &pcb->local, &pcb->foreign);
+    entry->last = now;
+    entry->rto *= 2;
+  }
 }
 
 static void
@@ -837,19 +865,51 @@ tcp_input(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct 
   return;
 }
 
+static void
+tcp_timer(void)
+{
+  struct tcp_pcb *pcb;
+  struct timeval now;
+  char addr1[IP_ADDR_STR_LEN];
+  char addr2[IP_ADDR_STR_LEN];
+
+  pthread_mutex_lock(&mutex);
+  gettimeofday(&now, NULL);
+  for (pcb = pcbs; pcb < tailof(pcbs); pcb++) {
+    if (pcb->state == TCP_PCB_STATE_FREE) {
+      continue;
+    }
+    if (pcb->state == TCP_PCB_STATE_TIME_WAIT) {
+      if (timercmp(&now, &pcb->tw_timer, >) != 0) {
+        debugf("timewait has elapsed, local=%s:%u, foreign=%s:%u",
+          ip_addr_ntop(pcb->local.addr, addr1, sizeof(addr1)), ntoh16(pcb->local.port),
+          ip_addr_ntop(pcb->foreign.addr, addr2, sizeof(addr2)), ntoh16(pcb->foreign.port));
+        tcp_pcb_release(pcb);
+        continue;
+      }
+    }
+    if (net_interrupt) {
+      pthread_cond_broadcast(&pcb->cond);
+      continue;
+    }
+    queue_foreach(&pcb->queue, tcp_retransmit_queue_emit, pcb);
+  }
+  pthread_mutex_unlock(&mutex);
+}
+
 int
 tcp_init(void)
 {
-  // struct timeval interval = {0,100000};
+  struct timeval interval = {0,100000};
 
   if (ip_protocol_register("TCP", IP_PROTOCOL_TCP, tcp_input) == -1) {
     errorf("ip_protocol_register() failure");
     return -1;
   }
-  // if (net_timer_register("TCP Timer", interval, tcp_timer) == -1) {
-  //   errorf("net_timer_register() failure");
-  //   return -1;
-  // }
+  if (net_timer_register("TCP Timer", interval, tcp_timer) == -1) {
+    errorf("net_timer_register() failure");
+    return -1;
+  }
   return 0;
 }
 
